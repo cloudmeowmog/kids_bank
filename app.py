@@ -34,17 +34,15 @@ def save_data(data):
     """每次存檔前，強制抓取最新的 sha 值來避免 409 衝突"""
     try:
         repo = get_repo()
-        # 1. 先抓取目前 GitHub 上的最新狀態
         contents = repo.get_contents(DATA_FILE)
         current_sha = contents.sha
         
-        # 2. 進行覆寫
         updated_content = json.dumps(data, ensure_ascii=False, indent=4)
         repo.update_file(
             path=DATA_FILE,
             message="Update via Streamlit",
             content=updated_content,
-            sha=current_sha # 使用最新抓到的 sha
+            sha=current_sha 
         )
         return True
     except Exception as e:
@@ -56,7 +54,16 @@ if 'data' not in st.session_state:
     st.session_state['data'] = load_data()
     st.session_state['children'] = list(st.session_state['data']['users'].keys())
 
-# ---------------- 核心邏輯 (自動補發利息與獎勵) ---------------- #
+# ---------------- 核心邏輯 ---------------- #
+def recalculate_balances(child_name, data):
+    """重新計算該帳戶的所有結餘與最終餘額 (用於編輯或刪除後)"""
+    user = data['users'][child_name]
+    current_balance = 0.0
+    for record in user['history']:
+        current_balance += record['amount']
+        record['balance'] = round(current_balance)
+    user['balance'] = round(current_balance)
+
 def auto_update_records(data):
     today = datetime.now().date()
     now = datetime.now()
@@ -127,11 +134,8 @@ def auto_update_records(data):
             
         info['history'] = [r for r in info['history'] if not r.get('_remove')]
         
-        current_balance = 0.0
-        for record in info['history']:
-            current_balance += record['amount']
-            record['balance'] = round(current_balance)
-        info['balance'] = round(current_balance)
+        # 呼叫重新計算確保準確
+        recalculate_balances(child_name, data)
         updated = True
         
     if updated:
@@ -159,6 +163,7 @@ with tab1:
     rate_display = f"{user_data['rate']*100:.2f}".rstrip('0').rstrip('.')
     st.markdown(f"### 目前餘額: **{int(round(user_data['balance']))}** 元 (當前利率: {rate_display}%)")
     
+    # 1. 顯示資料表
     if user_data['history']:
         df = pd.DataFrame(user_data['history'])
         df = df[['date', 'type', 'amount', 'balance', 'note']]
@@ -166,6 +171,62 @@ with tab1:
         st.dataframe(df.iloc[::-1], use_container_width=True, hide_index=True)
     else:
         st.info("目前尚無交易紀錄。")
+
+    # 2. 編輯與刪除區塊
+    st.markdown("---")
+    st.subheader("⚙️ 編輯或刪除紀錄")
+    
+    if user_data['history']:
+        # 建立選單選項 (反轉順序，讓最新的顯示在最上面)
+        reversed_records = list(reversed(list(enumerate(user_data['history']))))
+        options = {f"[{r['date']}] {r['type']} | {r['amount']}元 | {r.get('note', '')}": i for i, r in reversed_records}
+        
+        selected_record_str = st.selectbox("請選擇要操作的紀錄 (最新至最舊)", list(options.keys()))
+        
+        if selected_record_str:
+            idx = options[selected_record_str]
+            record = user_data['history'][idx]
+            
+            with st.form("edit_delete_form"):
+                st.write("**修改此筆紀錄：**")
+                colA, colB = st.columns(2)
+                with colA:
+                    # 顯示絕對值方便修改，保留你原本的貼心設計
+                    edit_amt = st.number_input("修改金額 (請輸入正數)", value=float(abs(record['amount'])), step=10.0)
+                with colB:
+                    edit_note = st.text_input("修改備註", value=record.get('note', ''))
+                
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    btn_save_edit = st.form_submit_button("💾 儲存修改", type="primary")
+                with col_btn2:
+                    btn_delete = st.form_submit_button("🗑️ 刪除此紀錄")
+                
+                if btn_save_edit:
+                    new_amt = edit_amt
+                    # 自動判斷正負號
+                    if "扣" in record['type'] or "提取" in record['type']:
+                        new_amt = -abs(new_amt)
+                    else:
+                        new_amt = abs(new_amt)
+                        
+                    st.session_state['data']['users'][target]['history'][idx]['amount'] = new_amt
+                    st.session_state['data']['users'][target]['history'][idx]['note'] = edit_note
+                    
+                    # 重新計算所有結餘
+                    recalculate_balances(target, st.session_state['data'])
+                    if save_data(st.session_state['data']):
+                        st.success("✅ 紀錄已修改，結餘已更新！")
+                        st.rerun()
+                        
+                if btn_delete:
+                    # 刪除該筆資料
+                    del st.session_state['data']['users'][target]['history'][idx]
+                    # 重新計算所有結餘
+                    recalculate_balances(target, st.session_state['data'])
+                    if save_data(st.session_state['data']):
+                        st.success("✅ 紀錄已刪除，結餘已更新！")
+                        st.rerun()
 
 # --- Tab 2: 新增交易 ---
 with tab2:
