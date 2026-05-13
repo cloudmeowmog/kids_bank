@@ -1,0 +1,18 @@
+{
+    "users": {
+        "Luke": {
+            "balance": 0,
+            "rate": 0.001,
+            "history": [],
+            "open_date": "2026-03-12"
+        },
+        "Leia": {
+            "balance": 0,
+            "rate": 0.01,
+            "history": [],
+            "open_date": "2026-03-12"
+        }
+    },
+    "last_update": "2026-05-13",
+    "daily_reward": 20.0
+}
