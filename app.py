@@ -5,16 +5,14 @@ from datetime import datetime, timedelta
 from github import Github
 
 # ---------------- 設定與 GitHub 連線設定 ---------------- #
-# 網頁基本設定
 st.set_page_config(page_title="孩子生活管理存款系統", layout="wide")
 
-# 檢查是否有設定 Secrets
 if "GITHUB_TOKEN" not in st.secrets or "REPO_NAME" not in st.secrets:
     st.error("請先在 Streamlit Cloud 後台設定 Secrets：GITHUB_TOKEN 與 REPO_NAME")
     st.stop()
 
 GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
-REPO_NAME = st.secrets["REPO_NAME"]  # 格式如 "你的帳號/你的儲存庫"
+REPO_NAME = st.secrets["REPO_NAME"]
 DATA_FILE = "kids_bank_data.json"
 
 @st.cache_resource
@@ -27,34 +25,38 @@ def load_data():
         repo = get_repo()
         contents = repo.get_contents(DATA_FILE)
         data = json.loads(contents.decoded_content.decode("utf-8"))
-        return data, contents.sha
+        return data
     except Exception as e:
         st.error(f"讀取 GitHub 資料失敗：{e}")
         st.stop()
 
-def save_data(data, sha):
+def save_data(data):
+    """每次存檔前，強制抓取最新的 sha 值來避免 409 衝突"""
     try:
         repo = get_repo()
+        # 1. 先抓取目前 GitHub 上的最新狀態
+        contents = repo.get_contents(DATA_FILE)
+        current_sha = contents.sha
+        
+        # 2. 進行覆寫
         updated_content = json.dumps(data, ensure_ascii=False, indent=4)
-        res = repo.update_file(
+        repo.update_file(
             path=DATA_FILE,
             message="Update via Streamlit",
             content=updated_content,
-            sha=sha
+            sha=current_sha # 使用最新抓到的 sha
         )
-        return res['commit'].sha
+        return True
     except Exception as e:
         st.error(f"寫回 GitHub 失敗：{e}")
-        return sha
+        return False
 
 # 初始化 Session State
 if 'data' not in st.session_state:
-    data, sha = load_data()
-    st.session_state['data'] = data
-    st.session_state['sha'] = sha
-    st.session_state['children'] = list(data['users'].keys())
+    st.session_state['data'] = load_data()
+    st.session_state['children'] = list(st.session_state['data']['users'].keys())
 
-# ---------------- 核心邏輯 (沿用原版並微調) ---------------- #
+# ---------------- 核心邏輯 (自動補發利息與獎勵) ---------------- #
 def auto_update_records(data):
     today = datetime.now().date()
     now = datetime.now()
@@ -139,9 +141,8 @@ def auto_update_records(data):
 
 # 每次重新整理網頁時，檢查是否需要自動發獎勵/利息
 if auto_update_records(st.session_state['data']):
-    new_sha = save_data(st.session_state['data'], st.session_state['sha'])
-    st.session_state['sha'] = new_sha
-    st.toast("已自動補齊漏掉的每日獎勵與利息！")
+    if save_data(st.session_state['data']):
+        st.toast("已自動補齊漏掉的每日獎勵與利息！")
 
 # ---------------- UI 介面設計 ---------------- #
 st.title("💰 孩子生活管理存款系統")
@@ -160,9 +161,8 @@ with tab1:
     
     if user_data['history']:
         df = pd.DataFrame(user_data['history'])
-        df = df[['date', 'type', 'amount', 'balance', 'note']] # 重新排序欄位
+        df = df[['date', 'type', 'amount', 'balance', 'note']]
         df.columns = ['日期時間', '類型', '異動金額', '目前結餘', '備註說明']
-        # 反轉順序讓最新的在最上面
         st.dataframe(df.iloc[::-1], use_container_width=True, hide_index=True)
     else:
         st.info("目前尚無交易紀錄。")
@@ -194,10 +194,9 @@ with tab2:
                     "balance": round(user["balance"]), "note": t_note
                 })
             
-            new_sha = save_data(st.session_state['data'], st.session_state['sha'])
-            st.session_state['sha'] = new_sha
-            st.success("✅ 紀錄已成功寫回 GitHub！")
-            st.rerun()
+            if save_data(st.session_state['data']):
+                st.success("✅ 紀錄已成功寫回 GitHub！")
+                st.rerun()
 
 # --- Tab 3: 系統設定 ---
 with tab3:
@@ -216,9 +215,8 @@ with tab3:
             for child in st.session_state['children']:
                 st.session_state['data']['users'][child]['rate'] = round(rates[child] / 100, 4)
             
-            new_sha = save_data(st.session_state['data'], st.session_state['sha'])
-            st.session_state['sha'] = new_sha
-            st.success("✅ 設定已更新並寫回 GitHub！")
+            if save_data(st.session_state['data']):
+                st.success("✅ 設定已更新並寫回 GitHub！")
 
 # --- Tab 4: 開戶日期 ---
 with tab4:
@@ -232,6 +230,6 @@ with tab4:
         if st.form_submit_button("儲存日期"):
             for child in st.session_state['children']:
                 st.session_state['data']['users'][child]['open_date'] = dates[child]
-            new_sha = save_data(st.session_state['data'], st.session_state['sha'])
-            st.session_state['sha'] = new_sha
-            st.success("✅ 開戶日期已更新！")
+            
+            if save_data(st.session_state['data']):
+                st.success("✅ 開戶日期已更新！")
