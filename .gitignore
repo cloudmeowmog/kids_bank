@@ -1,0 +1,11 @@
+# 個人資料檔不要上傳到 GitHub（避免外洩，也避免被覆蓋）
+kids_bank_data.json
+kids_bank_data.json.bak
+kids_bank_data.json.tmp
+
+# Python
+__pycache__/
+*.pyc
+
+# Streamlit secrets（若日後使用）
+.streamlit/secrets.toml
