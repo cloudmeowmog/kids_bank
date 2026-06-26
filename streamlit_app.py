@@ -422,18 +422,15 @@ def parse_excel_records(file_bytes):
 # ===========================================================================
 st.set_page_config(page_title="孩子存款系統", page_icon="🏦", layout="centered")
 
-# --- 暖色系外觀 ---
+# --- 按鈕樣式（整體配色改由 .streamlit/config.toml 主題控制，深色手機也清楚）---
 st.markdown(
     """
     <style>
-      .stApp { background-color: #FFF8E1; }
-      h1, h2, h3, h4, label, p, .stMarkdown { color: #4E342E !important; }
       div.stButton > button {
-          background-color: #FFCC80; color: #4E342E; font-weight: 700;
+          background-color: #FB8C00; color: #FFFFFF; font-weight: 700;
           border: 0; border-radius: 10px; padding: 0.45rem 1rem;
       }
-      div.stButton > button:hover { background-color: #FFA726; color: #4E342E; }
-      div[data-testid="stMetricValue"] { color: #D84315 !important; }
+      div.stButton > button:hover { background-color: #E65100; color: #FFFFFF; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -462,7 +459,10 @@ with st.sidebar:
 
     st.divider()
     st.subheader("🗄️ 資料備份 / 還原")
-    st.caption("雲端部署檔案不會長久保存，請定期下載備份。")
+    if _use_gsheets():
+        st.caption("資料已存在 Google Sheets，可隨時下載一份備份多一層保險。")
+    else:
+        st.caption("檔案模式資料不會長久保存，請定期下載備份。")
 
     st.download_button(
         "⬇️ 下載備份 (JSON)",
