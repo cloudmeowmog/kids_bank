@@ -1,8 +1,0 @@
-# 介面主題：強制亮色暖色系，深色模式手機也能看清楚
-[theme]
-base = "light"
-primaryColor = "#FB8C00"
-backgroundColor = "#FFF8E1"
-secondaryBackgroundColor = "#FFE0B2"
-textColor = "#4E342E"
-font = "sans serif"
