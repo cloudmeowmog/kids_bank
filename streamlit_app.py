@@ -174,32 +174,54 @@ def save_data(data):
 # ---------------------------------------------------------------------------
 # 自動補發每日獎勵 / 每月利息
 # ---------------------------------------------------------------------------
+def _rebuild_user(info):
+    """依目前 history 重新計算：排序 → 重算每月利息金額 → 重算每筆結餘與總餘額。
+    利息一律隨重算重新計算（以該筆之前的累積餘額 × 利率），金額為 0 的利息列保留，
+    避免每次載入又被重新加入而造成不必要的存檔。
+    """
+    info["history"].sort(key=lambda r: r["date"])
+    bal = 0.0
+    for r in info["history"]:
+        if r["type"] == "系統-每月利息":
+            r["amount"] = round(bal * info["rate"])
+        bal += r["amount"]
+        r["balance"] = round(bal)
+    info["balance"] = round(bal)
+
+
 def auto_update_records(data):
-    """從開戶日期起，補上至今缺少的每日獎勵與每月利息。
-    - 已存在的獎勵/利息日期不會被變更
-    - 利息於每月 1 日 08:00 結算，以當時帳戶餘額計算
+    """從開戶日期起，補上至今缺少的每日獎勵與每月利息；並移除「開戶日之前」殘留的
+    系統紀錄（每日獎勵/每月利息），讓把開戶日往後調整時不會多給。
+    - 只清理系統自動產生的紀錄；手動輸入的交易一律保留
+    - 利息於每月 1 日 08:00 結算，以當時帳戶餘額計算（隨重算更新）
     - 每日獎勵於 22:30 發放（已過 22:30 才含今天）
-    回傳 True 代表有補發並已存檔。
+    回傳 True 代表有變動並已存檔。
     """
     today = datetime.now().date()
     now = datetime.now()
     daily_reward = data.get("daily_reward", 0)
     updated = False
 
+    system_types = ("系統-每日獎勵", "系統-每月利息")
+
     for child_name, info in data["users"].items():
-        existing_reward_dates = set()
-        for r in info["history"]:
-            if r["type"] == "系統-每日獎勵":
-                existing_reward_dates.add(r["date"][:10])
-
-        existing_interest_months = set()
-        for r in info["history"]:
-            if r["type"] == "系統-每月利息":
-                existing_interest_months.add(r["date"][:7])
-
         open_date_str = info.get("open_date", data.get("last_update", today.strftime("%Y-%m-%d")))
         open_date = datetime.strptime(open_date_str, "%Y-%m-%d").date()
-        start_date = open_date
+
+        changed = False
+
+        # 1) 清掉「開戶日之前」殘留的系統紀錄（手動交易不動）
+        before = len(info["history"])
+        info["history"] = [
+            r for r in info["history"]
+            if not (r["type"] in system_types and r["date"][:10] < open_date_str)
+        ]
+        if len(info["history"]) != before:
+            changed = True
+
+        # 2) 統計現有的獎勵日期與利息月份
+        existing_reward_dates = {r["date"][:10] for r in info["history"] if r["type"] == "系統-每日獎勵"}
+        existing_interest_months = {r["date"][:7] for r in info["history"] if r["type"] == "系統-每月利息"}
 
         # 已過 22:30 則含今天，否則到昨天
         if now.hour > 22 or (now.hour == 22 and now.minute >= 30):
@@ -207,66 +229,35 @@ def auto_update_records(data):
         else:
             end_date = today - timedelta(days=1)
 
-        new_records = []
-        current_date = start_date
+        # 3) 從開戶日補到 end_date
+        rate_pct = fmt_rate(info["rate"])
+        current_date = open_date
         while current_date <= end_date:
             date_key = current_date.strftime("%Y-%m-%d")
             month_key = current_date.strftime("%Y-%m")
 
             if current_date.day == 1 and month_key not in existing_interest_months:
-                rate_pct = f"{info['rate'] * 100:.2f}".rstrip("0").rstrip(".")
-                new_records.append({
-                    "date": date_key + " 08:00",
-                    "type": "系統-每月利息",
-                    "amount": None,
-                    "note": f"利率 {rate_pct}%",
-                    "_is_interest": True,
+                info["history"].append({
+                    "date": date_key + " 08:00", "type": "系統-每月利息",
+                    "amount": 0, "balance": 0, "note": f"利率 {rate_pct}%",
                 })
+                existing_interest_months.add(month_key)
+                changed = True
 
             if daily_reward > 0 and date_key not in existing_reward_dates:
-                new_records.append({
-                    "date": date_key + " 22:30",
-                    "type": "系統-每日獎勵",
-                    "amount": daily_reward,
-                    "note": "每日固定配給 (22:30發放)",
+                info["history"].append({
+                    "date": date_key + " 22:30", "type": "系統-每日獎勵",
+                    "amount": daily_reward, "balance": 0, "note": "每日固定配給 (22:30發放)",
                 })
+                existing_reward_dates.add(date_key)
+                changed = True
 
             current_date += timedelta(days=1)
 
-        if not new_records:
-            continue
-
-        for rec in new_records:
-            if rec.get("_is_interest"):
-                rec["amount"] = 0
-                rec["balance"] = 0
-                del rec["_is_interest"]
-            else:
-                rec["balance"] = 0
-            info["history"].append(rec)
-
-        info["history"].sort(key=lambda r: r["date"])
-
-        current_balance = 0.0
-        for record in info["history"]:
-            if record["type"] == "系統-每月利息" and record["amount"] == 0:
-                interest = round(current_balance * info["rate"])
-                if interest > 0:
-                    record["amount"] = interest
-                else:
-                    record["_remove"] = True
-            current_balance += record["amount"]
-            record["balance"] = round(current_balance)
-
-        info["history"] = [r for r in info["history"] if not r.get("_remove")]
-
-        current_balance = 0.0
-        for record in info["history"]:
-            current_balance += record["amount"]
-            record["balance"] = round(current_balance)
-        info["balance"] = round(current_balance)
-
-        updated = True
+        # 4) 有變動才重建並標記存檔
+        if changed:
+            _rebuild_user(info)
+            updated = True
 
     if updated:
         data["last_update"] = today.strftime("%Y-%m-%d")
@@ -726,17 +717,17 @@ with tab_opendate:
             for child, d in new_dates.items():
                 data["users"][child]["open_date"] = d.strftime("%Y-%m-%d")
             save_data(data)
-            st.success("開戶日期已更新！按「重新計算帳戶」即可依新日期補發。")
+            st.success("開戶日期已更新！按「重新計算帳戶」即可依新日期調整。")
     with oc2:
         if st.button("🔄 重新計算帳戶", use_container_width=True):
             for child, d in new_dates.items():
                 data["users"][child]["open_date"] = d.strftime("%Y-%m-%d")
             save_data(data)
             if auto_update_records(data):
-                st.success("帳戶已重新計算，獎勵與利息已補齊！")
+                st.success("帳戶已依開戶日期重新計算（自動補齊或移除開戶日前的紀錄）！")
                 st.rerun()
             else:
-                st.info("所有帳戶皆已完整，無需補發。")
+                st.info("帳戶已是最新，無需調整。")
 
 # ---------------------------------------------------------------------------
 # 分頁四：系統設定
