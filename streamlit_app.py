@@ -438,6 +438,11 @@ st.title("🏦 孩子生活管理存款系統")
 
 # --- 側邊欄：餘額總覽 + 備份/還原 ---
 with st.sidebar:
+    # 🏠 回首頁：把導覽切回第一頁（此處在主導覽建立之前，設定 nav 狀態是安全的）
+    if st.button("🏠 回首頁", use_container_width=True):
+        st.session_state["nav"] = "➕ 新增交易"
+        st.rerun()
+
     if _use_gsheets():
         st.success("☁️ 儲存：Google Sheets", icon="✅")
     else:
@@ -476,15 +481,15 @@ with st.sidebar:
         except Exception as e:
             st.error(f"還原失敗：{e}")
 
-# --- 主分頁 ---
-tab_trans, tab_passbook, tab_opendate, tab_settings = st.tabs(
-    ["➕ 新增交易", "📒 查看存款簿", "📅 開戶日期", "⚙️ 系統設定"]
-)
+# --- 主導覽（用狀態控制，才能支援「回首頁」；上方橫向選單，手機也好按）---
+PAGES = ["➕ 新增交易", "📒 查看存款簿", "📅 開戶日期", "⚙️ 系統設定"]
+page = st.radio("功能選單", PAGES, key="nav", horizontal=True, label_visibility="collapsed")
+st.divider()
 
 # ---------------------------------------------------------------------------
 # 分頁一：新增交易
 # ---------------------------------------------------------------------------
-with tab_trans:
+if page == PAGES[0]:
     st.subheader("新增交易")
 
     # 送出成功後的訊息（跨 rerun 顯示，避免被重新整理洗掉）
@@ -567,7 +572,7 @@ with tab_trans:
 # ---------------------------------------------------------------------------
 # 分頁二：查看存款簿
 # ---------------------------------------------------------------------------
-with tab_passbook:
+elif page == PAGES[1]:
     st.subheader("查看存款簿")
 
     pb_target = st.selectbox("檢視帳戶", children, key="pb_target")
@@ -701,7 +706,7 @@ with tab_passbook:
 # ---------------------------------------------------------------------------
 # 分頁三：開戶日期
 # ---------------------------------------------------------------------------
-with tab_opendate:
+elif page == PAGES[2]:
     st.subheader("設定各帳戶開戶日期")
     st.caption("程式會從開戶日期起計算每日獎勵。")
 
@@ -735,7 +740,7 @@ with tab_opendate:
 # ---------------------------------------------------------------------------
 # 分頁四：系統設定
 # ---------------------------------------------------------------------------
-with tab_settings:
+elif page == PAGES[3]:
     st.subheader("系統設定")
 
     daily = st.number_input(
