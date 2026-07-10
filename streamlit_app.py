@@ -471,7 +471,7 @@ with st.sidebar:
                 raise ValueError("格式不正確")
             if st.button("確認還原（覆蓋目前資料）", type="primary", use_container_width=True):
                 save_data(restored)
-                st.success("已還原！")
+                st.toast("已還原！", icon="✅")
                 st.rerun()
         except Exception as e:
             st.error(f"還原失敗：{e}")
@@ -486,6 +486,10 @@ tab_trans, tab_passbook, tab_opendate, tab_settings = st.tabs(
 # ---------------------------------------------------------------------------
 with tab_trans:
     st.subheader("新增交易")
+
+    # 送出成功後的訊息（跨 rerun 顯示，避免被重新整理洗掉）
+    if "_tx_flash" in st.session_state:
+        st.success(st.session_state.pop("_tx_flash"))
 
     target = st.selectbox("選擇對象", children + ["兩人同時"], key="tx_target")
     ttype = st.selectbox(
@@ -555,10 +559,9 @@ with tab_trans:
                     f"(目前餘額 {int(round(user['balance']))} 元)"
                 )
             save_data(data)
-            st.success("\n\n".join(msgs))
-            # 清掉金額，保留選項
+            # 用暫存訊息在下一輪顯示；pop _tx_sig 讓金額於下一輪自動重設（在建立元件前）
+            st.session_state["_tx_flash"] = "\n\n".join(msgs)
             st.session_state.pop("_tx_sig", None)
-            st.session_state["tx_amount"] = 0.0
             st.rerun()
 
 # ---------------------------------------------------------------------------
@@ -640,7 +643,7 @@ with tab_passbook:
                 msg = f"匯入完成！新增 {added} 筆。"
                 if skipped:
                     msg += f"（跳過 {skipped} 筆重複）"
-                st.success(msg)
+                st.toast(msg, icon="✅")
                 st.rerun()
 
     # --- 編輯 / 刪除 ---
@@ -674,14 +677,14 @@ with tab_passbook:
                     rec["note"] = new_note
                     recalculate_balances(data, pb_target)
                     save_data(data)
-                    st.success("已修改，結餘已更新！")
+                    st.toast("已修改，結餘已更新！", icon="✅")
                     st.rerun()
             with ec2:
                 if st.button("🗑️ 刪除此筆", use_container_width=True):
                     del user["history"][idx]
                     recalculate_balances(data, pb_target)
                     save_data(data)
-                    st.success("已刪除，結餘已更新！")
+                    st.toast("已刪除，結餘已更新！", icon="✅")
                     st.rerun()
 
             st.divider()
@@ -692,7 +695,7 @@ with tab_passbook:
                     del user["history"][i]
                 recalculate_balances(data, pb_target)
                 save_data(data)
-                st.success(f"已刪除 {len(del_idx)} 筆，結餘已更新！")
+                st.toast(f"已刪除 {len(del_idx)} 筆，結餘已更新！", icon="✅")
                 st.rerun()
 
 # ---------------------------------------------------------------------------
@@ -724,7 +727,7 @@ with tab_opendate:
                 data["users"][child]["open_date"] = d.strftime("%Y-%m-%d")
             save_data(data)
             if auto_update_records(data):
-                st.success("帳戶已依開戶日期重新計算（自動補齊或移除開戶日前的紀錄）！")
+                st.toast("帳戶已依開戶日期重新計算！", icon="✅")
                 st.rerun()
             else:
                 st.info("帳戶已是最新，無需調整。")
@@ -756,5 +759,5 @@ with tab_settings:
         for child, val in rate_inputs.items():
             data["users"][child]["rate"] = round(val / 100, 4)
         save_data(data)
-        st.success("參數已儲存！（利率調整不會變更已登錄的舊利息）")
+        st.toast("參數已儲存！（利率調整不影響已登錄的舊利息）", icon="✅")
         st.rerun()
